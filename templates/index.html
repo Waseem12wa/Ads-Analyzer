@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Facebook Ads Downloader</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px 14px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            font-family: inherit;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        input::placeholder {
+            color: #999;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #e0e0e0;
+        }
+
+        .btn-secondary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .message {
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
+            animation: slideIn 0.3s ease;
+        }
+
+        .message.show {
+            display: block;
+        }
+
+        .message.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #c8e6c9;
+        }
+
+        .message.error {
+            background: #ffebee;
+            color: #c62828;
+            border: 1px solid #ffcdd2;
+        }
+
+        .message.info {
+            background: #e3f2fd;
+            color: #1565c0;
+            border: 1px solid #bbdefb;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .downloads-section {
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 2px solid #e0e0e0;
+        }
+
+        .downloads-section h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+
+        .download-item {
+            background: #f9f9f9;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+        }
+
+        .download-item-name {
+            color: #333;
+            flex: 1;
+            word-break: break-all;
+        }
+
+        .download-item-btn {
+            padding: 6px 12px;
+            background: white;
+            color: #667eea;
+            border: 1px solid #667eea;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            white-space: nowrap;
+            margin-left: 10px;
+            transition: all 0.2s ease;
+        }
+
+        .download-item-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .no-downloads {
+            color: #999;
+            font-size: 13px;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .result-item {
+            background: #f9f9f9;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+
+        .result-label {
+            color: #667eea;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .result-value {
+            color: #333;
+            word-break: break-all;
+        }
+
+        .loader {
+            display: none;
+        }
+
+        .loader.show {
+            display: block;
+            text-align: center;
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛒 Ad Analyzer</h1>
+        <p class="subtitle">Extract and download Facebook ads with URL matching</p>
+
+        <!-- Messages -->
+        <div id="message" class="message"></div>
+
+        <!-- Main Form -->
+        <form id="adForm">
+            <div class="form-group">
+                <label for="facebook-url">Facebook Ads Library URL *</label>
+                <input
+                    type="text"
+                    id="facebook-url"
+                    name="facebook_url"
+                    placeholder="https://www.facebook.com/ads/library/..."
+                    required
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="target-url">Target URL (Website) *</label>
+                <input
+                    type="text"
+                    id="target-url"
+                    name="target_url"
+                    placeholder="https://example.com or example.com"
+                    required
+                >
+            </div>
+
+            <div class="button-group">
+                <button type="submit" class="btn-primary" id="submitBtn">
+                    <span id="btnText">Analyze & Download</span>
+                </button>
+                <button type="button" class="btn-secondary" id="clearBtn">
+                    Clear Downloads
+                </button>
+            </div>
+        </form>
+
+        <!-- Result Section -->
+        <div id="resultSection" style="display: none; margin-bottom: 20px;">
+            <div id="resultContent"></div>
+        </div>
+
+        <!-- Loader -->
+        <div class="loader" id="loader">
+            <div class="spinner"></div>
+            <p>Processing... This may take 10-30 seconds</p>
+        </div>
+
+        <!-- Downloads Section -->
+        <div class="downloads-section">
+            <h3>📥 Recent Downloads</h3>
+            <div id="downloadsList"></div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('adForm');
+        const messageEl = document.getElementById('message');
+        const loaderEl = document.getElementById('loader');
+        const submitBtn = document.getElementById('submitBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const resultSection = document.getElementById('resultSection');
+        const resultContent = document.getElementById('resultContent');
+        const downloadsList = document.getElementById('downloadsList');
+
+        // Show message
+        function showMessage(msg, type = 'info') {
+            messageEl.textContent = msg;
+            messageEl.className = `message show ${type}`;
+            setTimeout(() => {
+                messageEl.classList.remove('show');
+            }, 5000);
+        }
+
+        // Load downloads list with folder structure
+        async function loadDownloads() {
+            try {
+                const response = await fetch('/api/downloads');
+                const data = await response.json();
+                
+                if (data.files && data.files.length > 0) {
+                    downloadsList.innerHTML = '<div style="max-height: 300px; overflow-y: auto;">' + 
+                        data.files.map(file => {
+                            const fileName = file.split(/[\/\\]/).pop();
+                            return `
+                        <div class="download-item">
+                            <span class="download-item-name" title="${file}">${file}</span>
+                            <button type="button" class="download-item-btn" onclick="downloadFile('${file.replace(/'/g, "\\'")}')">
+                                Download
+                            </button>
+                        </div>
+                    `;
+                        }).join('') + '</div>';
+                } else {
+                    downloadsList.innerHTML = '<div class="no-downloads">No downloads yet</div>';
+                }
+            } catch (error) {
+                console.error('Error loading downloads:', error);
+                downloadsList.innerHTML = '<div class="no-downloads">Error loading downloads</div>';
+            }
+        }
+
+        // Download file
+        async function downloadFile(filename) {
+            try {
+                const response = await fetch(`/api/download/${filename}`);
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                } else {
+                    showMessage('Error downloading file', 'error');
+                }
+            } catch (error) {
+                showMessage (`Error: ${error.message}`, 'error');
+            }
+        }
+
+        // Clear downloads
+        clearBtn.addEventListener('click', async () => {
+            if (!confirm('Are you sure you want to clear all downloads?')) return;
+            
+            try {
+                const response = await fetch('/api/clear-downloads', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    showMessage('Downloads cleared', 'success');
+                    loadDownloads();
+                } else {
+                    showMessage('Error clearing downloads', 'error');
+                }
+            } catch (error) {
+                showMessage(`Error: ${error.message}`, 'error');
+            }
+        });
+
+        // Form submission
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const facebookUrl = document.getElementById('facebook-url').value.trim();
+            const targetUrl = document.getElementById('target-url').value.trim();
+            
+            if (!facebookUrl || !targetUrl) {
+                showMessage('Please fill in both fields', 'error');
+                return;
+            }
+            
+            submitBtn.disabled = true;
+            loaderEl.classList.add('show');
+            resultSection.style.display = 'none';
+            
+            try {
+                const response = await fetch('/api/process-ad', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        facebook_url: facebookUrl,
+                        target_url: targetUrl
+                    })
+                });
+                
+                const data = await response.json();
+                loaderEl.classList.remove('show');
+                
+                if (data.success) {
+                    showMessage(`✅ ${data.message} (${data.total_matched} matching ads)`, 'success');
+                    
+                    // Show batch results
+                    let resultHTML = `
+                        <div class="result-item">
+                            <div class="result-label">Processing Summary:</div>
+                            <div class="result-value">
+                                • Total Checked: ${data.total_checked}<br>
+                                • Matched: ${data.total_matched}<br>
+                                • Downloaded: ${data.downloads ? data.downloads.length : 0}
+                            </div>
+                        </div>
+                    `;
+                    
+                    if (data.downloads && data.downloads.length > 0) {
+                        resultHTML += '<div class="result-item"><div class="result-label">Downloaded Ads:</div>';
+                        data.downloads.slice(0, 5).forEach((ad, idx) => {
+                            if (ad.library_id) {
+                                resultHTML += `
+                                    <div class="result-value" style="margin-bottom: 8px; padding: 8px; background: white; border-radius: 4px;">
+                                        <strong>AD_${ad.library_id}</strong><br>
+                                        📁 ${ad.media_files ? ad.media_files.length : 0} media files<br>
+                                        ${ad.description_file ? '📄 description.txt' : ''}
+                                    </div>
+                                `;
+                            }
+                        });
+                        if (data.downloads.length > 5) {
+                            resultHTML += `<div class="result-value">... and ${data.downloads.length - 5} more ads</div>`;
+                        }
+                        resultHTML += '</div>';
+                    }
+                    
+                    resultContent.innerHTML = resultHTML;
+                    resultSection.style.display = 'block';
+                    
+                    loadDownloads();
+                } else {
+                    showMessage('❌ ' + (data.error || data.message || 'Unknown error'), 'error');
+                    if (data.total_checked) {
+                        resultContent.innerHTML = `
+                            <div class="result-item">
+                                <div class="result-label">Processing Details:</div>
+                                <div class="result-value">
+                                    • Ads checked: ${data.total_checked}<br>
+                                    • Matching ads: ${data.total_matched}<br>
+                                    • Error: ${data.error || 'No matching ads found'}
+                                </div>
+                            </div>
+                        `;
+                        resultSection.style.display = 'block';
+                    }
+                }
+            } catch (error) {
+                loaderEl.classList.remove('show');
+                showMessage(`Error: ${error.message}`, 'error');
+            } finally {
+                submitBtn.disabled = false;
+            }
+        });
+
+        // Initial load
+        loadDownloads();
+    </script>
+</body>
+</html>
