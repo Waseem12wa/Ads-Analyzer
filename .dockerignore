@@ -1,0 +1,17 @@
+.git
+.gitignore
+*.md
+__pycache__
+*.pyc
+.DS_Store
+.venv
+venv
+node_modules
+.env
+downloads/*
+matched_*.txt
+cta_map*.txt
+library_ids.txt
+*.log
+.pytest_cache
+.coverage

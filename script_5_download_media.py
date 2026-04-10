@@ -15,8 +15,71 @@ import time
 import os
 from pathlib import Path
 import sys
+import json
+import re
 
-def download_media_for_library_id(library_id, parent_elem):
+def extract_video_urls_from_html(html_content):
+    """Extract video URLs from embedded JSON/script data in HTML"""
+    video_urls = []
+    
+    try:
+        # Look for video URLs in script tags
+        script_pattern = r'https?://[^"\s<>]+\.(?:mp4|webm|mov|m3u8)[^"\s<>]*'
+        matches = re.findall(script_pattern, html_content)
+        for match in matches:
+            if any(ext in match.lower() for ext in ['.mp4', '.webm', '.mov', '.m3u8']):
+                video_urls.append(match)
+    except:
+        pass
+    
+    return list(set(video_urls))  # Remove duplicates
+
+def download_video_with_selenium(video_url, video_path, driver):
+    """Download video using Selenium to maintain authenticated session"""
+    try:
+        # Use Selenium to download the video through the browser
+        # This maintains the authenticated session and bypasses 403 errors
+        script = f"""
+        (async function() {{
+            try {{
+                const response = await fetch('{video_url}', {{
+                    method: 'GET',
+                    credentials: 'include',
+                    headers: {{
+                        'Referer': window.location.href
+                    }}
+                }});
+                const blob = await response.blob();
+                const reader = new FileReader();
+                reader.onload = function() {{
+                    window.downloadedVideo = reader.result;
+                }};
+                reader.readAsArrayBuffer(blob);
+            }} catch(e) {{
+                console.error(e);
+            }}
+        }})()
+        """
+        
+        # Execute the download script
+        driver.execute_script(script)
+        time.sleep(3)  # Wait for download to complete
+        
+        # Get the downloaded data
+        video_data = driver.execute_script('return window.downloadedVideo')
+        
+        if video_data:
+            # Decode base64 and save
+            with open(video_path, 'wb') as f:
+                f.write(video_data)
+            return True
+        
+    except Exception as e:
+        print(f"      Selenium download failed: {str(e)[:80]}")
+    
+    return False
+
+def download_media_for_library_id(library_id, parent_elem, page_html='', driver=None):
     """Download all media (images, videos, description) for a Library ID"""
     
     download_dir = Path('downloads') / f'AD_{library_id}'
@@ -84,11 +147,50 @@ def download_media_for_library_id(library_id, parent_elem):
         if source_tag and source_tag.get('src'):
             videos.append(source_tag.get('src'))
     
+    # Check for picture elements (modern video containers)
+    for picture_elem in parent_elem.find_all('picture', limit=5):
+        for source_tag in picture_elem.find_all('source'):
+            src = source_tag.get('src', '')
+            if src and any(ext in src.lower() for ext in ['.mp4', '.webm', '.mov']):
+                videos.append(src)
+    
+    # Check data attributes for video URLs
+    for elem in parent_elem.find_all(limit=50):
+        for attr in ['data-src', 'data-video', 'data-video-src']:
+            value = elem.get(attr, '')
+            if value and any(ext in value.lower() for ext in ['.mp4', '.webm', '.mov']):
+                videos.append(value)
+    
+    # Check all img elements for potential video thumbnails with video data
+    for img in parent_elem.find_all('img', limit=10):
+        # Sometimes video thumbnails have usable src that points to video
+        img_src = img.get('src', '')
+        if 'video' in img_src.lower() and any(ext in img_src.lower() for ext in ['.mp4', '.webm']):
+            videos.append(img_src)
+        
+        # Check for data attributes on images
+        for attr in ['data-video', 'data-src']:
+            value = img.get(attr, '')
+            if value and any(ext in value.lower() for ext in ['.mp4', '.webm', '.mov']):
+                videos.append(value)
+    
     # Check links for video files
-    for link in parent_elem.find_all('a', href=True, limit=20):
-        href = link.get('href', '').lower()
-        if any(ext in href for ext in ['.mp4', '.webm', '.mov']):
-            videos.append(link.get('href'))
+    for link in parent_elem.find_all('a', href=True, limit=30):
+        href = link.get('href', '')
+        href_lower = href.lower()
+        if any(ext in href_lower for ext in ['.mp4', '.webm', '.mov']):
+            videos.append(href)
+    
+    # Extract videos from embedded page HTML (Facebook embeds URLs in JSON/script)
+    if page_html:
+        embedded_videos = extract_video_urls_from_html(page_html)
+        videos.extend(embedded_videos)
+    
+    # Remove duplicates
+    videos = list(set(v for v in videos if v))
+    
+    if videos:
+        print(f"    Found {len(videos)} potential video URL(s)")
     
     # Download videos
     video_count = 0
@@ -97,35 +199,80 @@ def download_media_for_library_id(library_id, parent_elem):
             continue
         
         try:
-            response = requests.get(video_src, headers=headers, timeout=60, allow_redirects=True, stream=True)
-            response.raise_for_status()
+            # Skip very small/placeholder URLs
+            if len(video_src) < 30:
+                continue
+            
+            print(f"    Downloading video {video_count + 1}: {video_src[:80]}...")
             
             # Determine extension
-            content_type = response.headers.get('content-type', '').lower()
             url_lower = video_src.lower()
-            
-            if 'mp4' in content_type or '.mp4' in url_lower:
+            if '.mp4' in url_lower:
                 ext = '.mp4'
-            elif 'webm' in content_type or '.webm' in url_lower:
+            elif '.webm' in url_lower:
                 ext = '.webm'
-            elif 'mov' in content_type or '.mov' in url_lower:
+            elif '.mov' in url_lower:
                 ext = '.mov'
+            elif 'm3u8' in url_lower or 'playlist' in url_lower:
+                print(f"    ⚠ Found HLS stream (m3u8) - skipping")
+                continue
             else:
                 ext = '.mp4'
             
             # Save video
             filename = f'video{f"_{video_count}" if video_count > 0 else ""}{ext}'
             video_path = download_dir / filename
+            
+            # Try Selenium download first (with authenticated session)
+            if driver:
+                print(f"      Attempting Selenium download...")
+                if download_video_with_selenium(video_src, str(video_path), driver):
+                    final_size_mb = video_path.stat().st_size / (1024 * 1024)
+                    if final_size_mb > 0.1:
+                        print(f"    ✓ Downloaded video: {filename} ({final_size_mb:.2f}MB)")
+                        video_count += 1
+                        continue
+                    else:
+                        video_path.unlink()
+            
+            # Fallback: Try direct HTTP request (will likely fail for Facebook videos)
+            print(f"      Trying direct download...")
+            headers_with_referer = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://www.facebook.com/',
+            }
+            
+            response = requests.get(video_src, headers=headers_with_referer, timeout=30, allow_redirects=True, stream=True)
+            response.raise_for_status()
+            
+            # Check file size
+            content_length = response.headers.get('content-length')
+            if content_length and int(content_length) < 100000:  # Less than 100KB
+                print(f"    ✗ File too small - skipped")
+                continue
+            
             with open(video_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+                    if chunk:
+                        f.write(chunk)
             
-            size_mb = video_path.stat().st_size / (1024 * 1024)
-            print(f"    ✓ Downloaded video: {filename} ({size_mb:.2f}MB)")
-            video_count += 1
-            
+            final_size_mb = video_path.stat().st_size / (1024 * 1024)
+            if final_size_mb > 0.1:
+                print(f"    ✓ Downloaded video: {filename} ({final_size_mb:.2f}MB)")
+                video_count += 1
+            else:
+                video_path.unlink()
+                
         except Exception as e:
-            print(f"    ✗ Error downloading video: {e}")
+            error_str = str(e)[:100]
+            if '403' in error_str:
+                print(f"    ✗ Access denied (403) - video protected")
+            else:
+                print(f"    ✗ Error: {error_str}")
+    
+    return download_dir
+    
+    return download_dir
     
     return download_dir
 
@@ -158,14 +305,29 @@ def download_matched_library_ids(facebook_url):
         driver = webdriver.Chrome(options=options)
         driver.get(facebook_url)
         
-        # Wait and scroll
-        print("Waiting and scrolling to load all ads...")
-        time.sleep(5)
-        for scroll_num in range(15):
-            driver.execute_script("window.scrollBy(0, 5000);")
-            time.sleep(2)
+        # Wait and scroll - longer wait for videos to load
+        print("Waiting and scrolling to load all ads and videos...")
+        time.sleep(8)  # Increased wait for initial page load
         
-        time.sleep(3)
+        last_height = driver.execute_script("return document.body.scrollHeight")
+        scroll_count = 0
+        max_scrolls = 25  # More scrolls to load more content
+        
+        while scroll_count < max_scrolls:
+            driver.execute_script("window.scrollBy(0, 3000);")
+            time.sleep(3)  # Increased wait between scrolls for video loading
+            scroll_count += 1
+            
+            print(f"  Scrolled {scroll_count}/{max_scrolls}...")
+            
+            # Check if we've reached bottom
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                print("  Reached end of page")
+                break
+            last_height = new_height
+        
+        time.sleep(5)  # Final wait for any remaining content
         
         # Parse page
         soup = BeautifulSoup(driver.page_source, 'html.parser')
@@ -201,7 +363,7 @@ def download_matched_library_ids(facebook_url):
                         continue
                     
                     # Download media
-                    download_media_for_library_id(lib_id, parent)
+                    download_media_for_library_id(lib_id, parent, driver.page_source, driver)
                     downloaded_count += 1
                     
             except Exception as e:

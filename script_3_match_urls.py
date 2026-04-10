@@ -80,8 +80,15 @@ def match_urls(target_url):
             
             cta_domain, cta_path = result
             
-            # Match if domain is same
-            if cta_domain == target_domain:
+            # Match if domain is same OR if target domain contains the CTA domain (subdomain handling)
+            # Examples: "savelix.com" matches "offer.savelix.com" or "savelix.com"
+            domain_matches = (
+                cta_domain == target_domain or  # Exact match: savelix.com == savelix.com
+                target_domain.endswith('.' + cta_domain) or  # Subdomain: offer.savelix.com ends with .savelix.com
+                cta_domain.endswith('.' + target_domain)  # Reverse subdomain: savelix.com.offer matches .offer
+            )
+            
+            if domain_matches:
                 matched.append(lib_id)
                 print(f"[MATCH] {lib_id} -> {cta_url}")
             else:
