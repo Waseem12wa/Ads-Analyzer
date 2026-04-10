@@ -79,7 +79,7 @@ class FacebookAdAnalyzer:
                     pass
 
     def _scrape_ad_library(self, driver, target_url):
-        """Scrape Facebook Ads Library page with multiple strategies"""
+        """Scrape Facebook Ads Library page - find ad cards and extract media + links"""
         try:
             page_source = driver.page_source
             soup = BeautifulSoup(page_source, 'html.parser')
@@ -87,192 +87,133 @@ class FacebookAdAnalyzer:
             print("Searching for ads in page...")
             
             all_ads = []
-            processed_urls = set()  # Track processed URLs to avoid duplicates
+            processed_urls = set()
             
-            # REVISED: Find divs containing BOTH images and links
-            print("\nSearching for ad containers (divs with images + links)...")
-            divs = soup.find_all('div', recursive=True, limit=5000)  # Limit divs to avoid excessive parsing
-            print(f"Found {len(divs)} divs, analyzing for ads...")
+            # Strategy 1: Find ad containers using multiple selectors
+            # Facebook ads library typically uses role="article" or similar for ad cards
+            print("\nLooking for ad card containers...")
             
-            for div in divs:
-                # Look for images in this div
-                img = div.find('img', recursive=True)
-                if not img:
-                    continue
+            # Try multiple selectors to find ad containers
+            ad_containers = []
+            
+            # Selector 1: Look for divs with role="article" (common for media/cards)
+            ad_containers.extend(soup.find_all('div', attrs={'role': 'article'}))
+            print(f"  Found {len(ad_containers)} elements with role='article'")
+            
+            # Selector 2: Look for divs with role="button" that contain images/videos
+            button_divs = soup.find_all('div', attrs={'role': 'button'})
+            print(f"  Found {len(button_divs)} button elements")
+            for btn_div in button_divs:
+                img = btn_div.find('img')
+                if img and img not in [c.find('img') for c in ad_containers if c.find('img')]:
+                    ad_containers.append(btn_div)
+            
+            # Selector 3: Look for common ad card class patterns
+            for div in soup.find_all('div'):
+                class_attr = div.get('class', [])
+                if any(x in str(class_attr).lower() for x in ['ad', 'card', 'container', 'item']):
+                    img = div.find('img')
+                    if img and img.get('src'):
+                        if len(img.get('src')) > 20 and 'icon' not in img.get('src').lower():
+                            if div not in ad_containers:
+                                ad_containers.append(div)
+            
+            print(f"Total ad containers found: {len(ad_containers)}")
+            
+            # Now extract ads from each container
+            for idx, container in enumerate(ad_containers):
+                if len(all_ads) >= 100:  # Stop at 100 ads
+                    break
                 
-                img_src = img.get('src', '')
-                if not img_src or len(img_src) < 20:
-                    continue
+                # Find images in this container
+                images = container.find_all('img', limit=3)  # Usually 1 main image per ad
                 
-                # Skip meaningless images
-                if any(x in img_src.lower() for x in ['icon', 'pixel', 'spacer', 'placeholder', '1x1', 'data:', 
-                                                       'facebook.com/images', 'static.xx.fbcdn.net/rsrc.php',
-                                                       '//fb','fbcdn.net/rsrc', 'scontent']):
-                    continue
+                for img in images:
+                    img_src = img.get('src', '')
+                    
+                    if not img_src or len(img_src) < 20:
+                        continue
+                    
+                    # Skip meaningless images
+                    if any(x in img_src.lower() for x in ['icon', 'pixel', 'spacer', 'placeholder', '1x1', 'data:',
+                                                           'facebook.com/images', 'fbcdn.net/rsrc', 'scontent.xx']):
+                        continue
+                    
+                    # Extract text content from this container
+                    text = container.get_text(strip=True, separator=' ')[:500]
+                    
+                    # Find any clickable elements or links in container
+                    links = container.find_all(['a', 'button', 'div'], attrs={'role': 'button'}, limit=5)
+                    
+                    # If we have an image, create an ad entry even if we don't have a proper link
+                    # (the image itself is valuable)
+                    ad_info = {
+                        'media_url': img_src,
+                        'media_type': 'image',
+                        'description': text[:200] if len(text) > 20 else '',
+                        'source': 'ad_card'
+                    }
+                    
+                    # Try to extract any URL from links
+                    for link in links:
+                        href = link.get('href', '')
+                        if href and href not in processed_urls and not href.startswith('#'):
+                            if len(href) > 10:
+                                processed_urls.add(href)
+                                ad_info['cta_url'] = href
+                                ad_info['cta_text'] = link.get_text(strip=True)[:100] or 'Visit'
+                                break
+                    
+                    ad_info_str = f"{img_src[:50]}..."
+                    if ad_info.get('cta_url'):
+                        ad_info_str += f" → {ad_info['cta_url'][:50]}"
+                    
+                    all_ads.append(ad_info)
+                    if len(all_ads) <= 15:
+                        print(f"  Found ad #{len(all_ads)}: {ad_info_str}")
+            
+            print(f"\nExtracted {len(all_ads)} ads from ad cards")
+            
+            # If we didn't find much, try one more strategy: extract ALL images with any nearby text
+            if len(all_ads) < 5:
+                print("\nFinal fallback: Extracting all images with surrounding text...")
+                all_images = soup.find_all('img', limit=200)  # Limit to 200 images
                 
-                # Look for links in this SAME div
-                links = div.find_all('a', href=True, recursive=True, limit=10)
-                
-                for link in links:
-                    href = link.get('href', '')
+                for img in all_images:
+                    img_src = img.get('src', '')
                     
-                    # Skip bad links
-                    if not href or href.startswith('#') or len(href) < 10:
-                        continue
-                    if 'javascript:' in href.lower():
-                        continue
-                    if any(x in href.lower() for x in ['facebook.com/ads', 'facebook.com/help', 'facebook.com/policies']):
+                    if not img_src or len(img_src) < 20 or img_src in [ad.get('media_url') for ad in all_ads]:
                         continue
                     
-                    if href in processed_urls:
+                    if any(x in img_src.lower() for x in ['icon', 'pixel', '1x1', 'facebook.com/images']):
                         continue
                     
-                    processed_urls.add(href)
-                    
-                    # Get text from this ad container for description
-                    text_content = div.get_text(strip=True)[:300]
+                    # Get text from parent elements
+                    parent = img.parent
+                    text = ''
+                    for _ in range(3):
+                        if parent:
+                            text = parent.get_text(strip=True, separator=' ')[:300]
+                            if len(text) > 50:
+                                break
+                            parent = parent.parent
                     
                     ad_info = {
                         'media_url': img_src,
                         'media_type': 'image',
-                        'cta_url': best_link_href,
-                        'cta_text': best_link_text,
-                        'description': text_content if len(text_content) > 20 else '',
-                        'source': 'div_container'
+                        'description': text if len(text) > 20 else '',
+                        'source': 'fallback_image'
                     }
+                    
                     all_ads.append(ad_info)
-                    
-                    if len(all_ads) <= 10:
-                        print(f"  Found ad #{len(all_ads)}: {href[:60]}...")
-                    break  # Only use first valid link per image
-            
-            print(f"\nExtracted {len(all_ads)} ads from containers")
-            
-            # Strategy 2: Find ALL videos with associated links
-            print("\nStrategy 2: Extracting videos with associated links...")
-            videos = soup.find_all('video')  # No limit - get ALL videos
-            print(f"Found {len(videos)} videos total")
-            
-            for video in videos:
-                source_tag = video.find('source')
-                if not source_tag or not source_tag.get('src'):
-                    continue
-                
-                video_src = source_tag.get('src')
-                
-                # Look for nearby links
-                parent = video.parent
-                best_link_href = None
-                best_link_text = ''
-                description = ''
-                
-                for level in range(10):
-                    if not parent:
-                        break
-                    
-                    links = parent.find_all('a', href=True, recursive=False)
-                    for link in links:
-                        href = link.get('href', '')
-                        
-                        if not href or href.startswith('#') or 'javascript:' in href.lower():
-                            continue
-                        if any(x in href.lower() for x in ['facebook.com/ads', 'facebook.com/help']):
-                            continue
-                        
-                        if len(href) > 10:
-                            best_link_href = href
-                            best_link_text = link.get_text(strip=True)[:100] or 'Ad'
-                            nearby_text = parent.get_text(strip=True)[:300]
-                            if nearby_text and len(nearby_text) > 20:
-                                description = nearby_text
-                            break
-                    
-                    if best_link_href:
-                        break
-                    
-                    parent = parent.parent
-                
-                if best_link_href and best_link_href not in processed_urls:
-                    processed_urls.add(best_link_href)
-                    
-                    ad_info = {
-                        'media_url': video_src,
-                        'media_type': 'video',
-                        'cta_url': best_link_href,
-                        'cta_text': best_link_text,
-                        'description': description if description else '',
-                        'source': 'video_link'
-                    }
-                    all_ads.append(ad_info)
-                    print(f"  Found video ad: {best_link_href[:60]}...")
-            
-            # Strategy 3: Collect ALL external links as potential ads
-            print("\nStrategy 3: Extracting ALL external links as potential ads...")
-            all_links = soup.find_all('a', href=True)  # No limit - get ALL links
-            print(f"Found {len(all_links)} links total")
-            
-            link_count = 0
-            for link in all_links:
-                
-                href = link.get('href', '')
-                link_text = link.get_text(strip=True)
-                
-                if not href or href.startswith('#') or 'javascript:' in href.lower():
-                    continue
-                
-                if any(x in href.lower() for x in ['facebook.com/ads', 'facebook.com/help', 'facebook.com/policies']):
-                    continue
-                
-                if len(href) < 10 or href in processed_urls:
-                    continue
-                
-                # Check if this link has media nearby
-                parent = link.parent
-                media_url = None
-                media_type = 'none'
-                
-                for _ in range(3):
-                    if not parent:
-                        break
-                    
-                    img = parent.find('img')
-                    if img and img.get('src'):
-                        media_url = img.get('src')
-                        media_type = 'image'
-                        break
-                    
-                    video = parent.find('video')
-                    if video:
-                        source = video.find('source')
-                        if source and source.get('src'):
-                            media_url = source.get('src')
-                            media_type = 'video'
-                            break
-                    
-                    parent = parent.parent
-                
-                processed_urls.add(href)
-                link_count += 1
-                
-                ad_info = {
-                    'cta_url': href,
-                    'cta_text': link_text[:100] if link_text else 'Ad',
-                    'media_type': media_type,
-                    'source': 'link_fallback'
-                }
-                
-                if media_url:
-                    ad_info['media_url'] = media_url
-                
-                all_ads.append(ad_info)
-            
-            print(f"\nTotal extracted: {len(all_ads)} ads from all strategies")
             
             if not all_ads:
                 print("No ads found on page. The page might not have loaded properly.")
                 return []
             
-            # Look for matching URLs
+            print(f"\nTotal: {len(all_ads)} ads extracted")
+            
+            # Try to match to target URL or return all ads with media
             matched_ads = []
             for ad in all_ads:
                 if ad.get('cta_url'):
@@ -280,22 +221,13 @@ class FacebookAdAnalyzer:
                         ad['match'] = True
                         matched_ads.append(ad)
             
-            print(f"\nFound {len(matched_ads)} matching ads (out of {len(all_ads)} total)")
-            
-            # Return ALL matched ads
             if matched_ads:
+                print(f"\nFound {len(matched_ads)} matching ads (out of {len(all_ads)} total)")
                 return matched_ads
             
-            # If no match, return best ones with media
-            if all_ads:
-                ads_with_media = [ad for ad in all_ads if ad.get('media_url')]
-                if ads_with_media:
-                    print(f"No matching URLs found, returning {min(10, len(ads_with_media))} best ads with media")
-                    return ads_with_media[:10]
-                print(f"No ads with media found, returning {min(10, len(all_ads))} best ads")
-                return all_ads[:10]
-            
-            return []
+            # If no URL matches, return ads with media (images are valuable even without URLs)
+            print(f"\nNo direct URL matches. Returning all {len(all_ads)} ads with media.")
+            return all_ads
             
         except Exception as e:
             print(f"Scraping error: {str(e)}")
@@ -483,27 +415,42 @@ class FacebookAdAnalyzer:
         print(f"Matched ads: {len(matched_ads)}")
         print(f"Unmatched ads: {len(unmatched_ads)}")
         
-        # Process all matched ads
+        # IMPORTANT: If no matched ads found but we have ads with media, process all of them
+        # (Facebook Ads Library search already filters results, so all found ads are relevant)
+        ads_to_process = matched_ads if matched_ads else [ad for ad in ads_data if ad.get('media_url')]
+        
+        if not ads_to_process:
+            return {
+                "success": False,
+                "total_matched": 0,
+                "total_checked": len(ads_data),
+                "message": "No ads with media found",
+                "downloads": []
+            }
+        
+        # Process all selected ads
         results = {
-            "success": len(matched_ads) > 0,
+            "success": len(ads_to_process) > 0,
             "total_matched": len(matched_ads),
             "total_checked": len(ads_data),
-            "message": f"Found {len(matched_ads)} matching ads",
+            "message": f"Processing {len(ads_to_process)} ads" if matched_ads else f"Processing {len(ads_to_process)} ads (rel evant to search query)",
             "downloads": []
         }
         
-        if len(matched_ads) == 0:
-            results["message"] = "No matching ads found"
-            return results
+        print(f"Will process: {len(ads_to_process)} ads")
         
-        # Process each matched ad
-        for idx, ad in enumerate(matched_ads, 1):
-            print(f"\n--- Processing Matched Ad {idx}/{len(matched_ads)} ---")
-            ad_result = self._process_single_ad(ad, idx)
-            results["downloads"].append(ad_result)
+        # Process each selected ad
+        for idx, ad in enumerate(ads_to_process, 1):
+            if idx <= 100:  # Limit to 100 downloads per session
+                print(f"\n--- Processing Ad {idx}/{len(ads_to_process)} ---")
+                ad_result = self._process_single_ad(ad, idx)
+                results["downloads"].append(ad_result)
+            else:
+                print(f"Limiting downloads to 100 ads (found {len(ads_to_process)} total)")
+                break
         
         print(f"\n=== Processing Complete ===")
-        print(f"Total matched ads downloaded: {len(matched_ads)}")
+        print(f"Total ads processed: {len(results['downloads'])}")
         
         return results
     
