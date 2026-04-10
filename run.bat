@@ -1,53 +1,39 @@
 @echo off
 echo ========================================
-echo Facebook Ads Downloader Tool
+echo Facebook Ads Library Download Tool
 echo ========================================
 echo.
 
-REM Check if Python is installed (try both py and python)
+echo Checking Python installation...
 py --version >nul 2>&1
 if errorlevel 1 (
-    python --version >nul 2>&1
-    if errorlevel 1 (
-        echo Error: Python is not installed or not in PATH
-        echo Please install Python 3.13 from https://www.python.org
-        pause
-        exit /b 1
-    )
-    set PYTHON_CMD=python
-) else (
-    set PYTHON_CMD=py
+    echo Error: Python not found. Please install Python 3.13+
+    echo Download from: https://www.python.org
+    pause
+    exit /b 1
 )
 
-echo Installing required packages...
-%PYTHON_CMD% -m pip install -r requirements.txt
+echo Installing dependencies...
+py -m pip install -q -r requirements.txt
 
 if errorlevel 1 (
-    echo Error: Failed to install packages
+    echo Error: Failed to install dependencies
     pause
     exit /b 1
 )
 
 echo.
 echo ========================================
-echo Starting the application...
+echo Starting Web Interface
 echo ========================================
 echo.
-echo The tool will open at: http://127.0.0.1:5000
-echo Press Ctrl+C to stop the server
+echo Opening at: http://127.0.0.1:5000
+echo Press Ctrl+C to stop
 echo.
 
-%PYTHON_CMD% backend.py
+py app.py
 
 pause
-@echo off
-echo ====================================
-echo Ad Auto Download Tool Installer
-echo ====================================
-echo.
-
-REM Check if Python is installed
-python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo Error: Python is not installed or not in PATH
     echo Please install Python 3.8+ and add it to PATH
